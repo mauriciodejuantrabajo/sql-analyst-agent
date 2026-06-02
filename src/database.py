@@ -72,6 +72,25 @@ class Database:
         finally:
             conn.close()
 
+    def table_summaries(self) -> dict[str, list[str]]:
+        """Devuelve {tabla: [columnas]} para describir la base en lenguaje natural."""
+        conn = self._connect()
+        try:
+            tables = [
+                row["name"]
+                for row in conn.execute(
+                    "SELECT name FROM sqlite_master "
+                    "WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+                    "ORDER BY name"
+                )
+            ]
+            return {
+                t: [c["name"] for c in conn.execute(f"PRAGMA table_info({t})")]
+                for t in tables
+            }
+        finally:
+            conn.close()
+
     @staticmethod
     def _distinct_values(
         conn: sqlite3.Connection, table: str, column: str, col_type: str, max_values: int = 10

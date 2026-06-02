@@ -47,13 +47,24 @@ Reglas:
 """
 
 CLASSIFY_SYSTEM_PROMPT = """\
-Decidís si el mensaje del usuario es una PREGUNTA SOBRE DATOS que se puede
-responder consultando una base de datos, o si es otra cosa (un saludo, charla,
-una pregunta general, etc.).
+Clasificás el mensaje del usuario en UNA de estas tres categorías. Respondé SOLO
+con la palabra de la categoría, sin explicaciones.
 
-Te paso el esquema de la base y el mensaje. Respondé SOLO con una palabra:
-- "DATOS" si se puede responder con una consulta SQL sobre ese esquema.
-- "OTRO" en cualquier otro caso.
+- DATOS: pide un dato concreto que sale de consultar filas de la base.
+  Ej: "cuántos clientes hay", "top 5 productos por ventas", "pedidos de Lima".
+
+- META: pregunta sobre el agente o sobre QUÉ información hay disponible, no sobre
+  un dato puntual. Incluye pedir ayuda o saber qué se puede preguntar.
+  Ej: "qué tenés", "qué datos hay", "qué podés hacer", "ayuda", "cómo funcionás",
+  "qué tablas hay", "sobre qué puedo preguntar".
+
+- OTRO: saludos o charla que no se relacionan con la base.
+  Ej: "hola", "gracias", "cómo estás", "contame un chiste".
+
+Ante la duda entre DATOS y META: si el mensaje NO nombra una entidad concreta de
+la base (cliente, pedido, producto, ciudad, etc.), es META.
+
+Respondé exactamente: DATOS, META u OTRO.
 """
 
 
@@ -84,11 +95,27 @@ class SQLAgent:
         self.llm = llm
         self.max_retries = max_retries
 
-    def _is_data_question(self, question: str, schema: str) -> bool:
-        """¿El mensaje se puede responder con una consulta a la base?"""
+    def _classify(self, question: str, schema: str) -> str:
+        """Clasifica el mensaje en DATOS, META u OTRO."""
         prompt = f"Esquema:\n{schema}\n\nMensaje: {question}"
         answer = self.llm.chat(CLASSIFY_SYSTEM_PROMPT, prompt).strip().upper()
-        return answer.startswith("DATOS")
+        for label in ("DATOS", "META", "OTRO"):
+            if label in answer:
+                return label
+        return "DATOS"  # default conservador: intentar responder con datos
+
+    def _describe_capabilities(self, schema: str) -> str:
+        """Respuesta para preguntas META: qué hay en la base y qué se puede pedir."""
+        tables = self.db.table_summaries()
+        lines = ["Puedo consultar esta base de datos. Tablas disponibles:"]
+        for name, cols in tables.items():
+            lines.append(f"  • {name}: {', '.join(cols)}")
+        lines.append(
+            "\nProbá preguntas como: «¿cuántos clientes hay?», "
+            "«top 5 productos más vendidos» o «pedidos completados de Lima». "
+            "Escribí 'schema' para ver el detalle técnico."
+        )
+        return "\n".join(lines)
 
     def _generate_sql(self, question: str, schema: str, prev_error: str | None) -> str:
         prompt = f"Esquema:\n{schema}\n\nPregunta: {question}"
@@ -112,17 +139,21 @@ class SQLAgent:
     def ask(self, question: str) -> AgentResult:
         schema = self.db.schema_description()
 
-        # Si no es una pregunta de datos, no fabriques SQL: respondé y salí.
-        if not self._is_data_question(question, schema):
+        # No fabriques SQL salvo que el mensaje pida un dato concreto.
+        category = self._classify(question, schema)
+        if category == "META":
             return AgentResult(
-                question=question,
-                sql="",
-                columns=[],
-                rows=[],
+                question=question, sql="", columns=[], rows=[],
+                explanation=self._describe_capabilities(schema),
+                is_query=False,
+            )
+        if category == "OTRO":
+            return AgentResult(
+                question=question, sql="", columns=[], rows=[],
                 explanation=(
-                    "Eso no parece una pregunta sobre los datos. Preguntame algo "
-                    "sobre la base, por ejemplo: «¿qué categoría vende más?» o "
-                    "«clientes con más pedidos». Escribí 'schema' para ver las tablas."
+                    "¡Hola! Soy un agente que responde preguntas sobre una base de "
+                    "datos. Preguntame por ejemplo «¿cuántos clientes hay?» o "
+                    "«top 5 productos más vendidos». Escribí 'schema' para ver las tablas."
                 ),
                 is_query=False,
             )
