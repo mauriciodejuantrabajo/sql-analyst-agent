@@ -52,7 +52,7 @@ Un agente *text-to-SQL* que:
 
 ```
 src/
-├── llm.py        Capa de LLM. Hoy Ollama; diseñada para sumar DeepSeek sin tocar el resto.
+├── llm.py        Capa de LLM. Hoy Ollama; diseñada para sumar otro backend sin tocar el resto.
 ├── database.py   Inspección de esquema + ejecución SOLO LECTURA (validación de seguridad).
 ├── agent.py      Orquesta: clasifica → SQL → ejecuta → (reintenta) → explica → recuerda.
 └── main.py       CLI interactivo (rich).
@@ -118,7 +118,7 @@ de escritura y múltiples sentencias. El LLM no puede modificar ni borrar datos.
 
 ## Próximos pasos
 
-- [ ] Fallback a DeepSeek vía `.env` (la capa `llm.py` ya está preparada).
+- [ ] Soporte para un backend LLM adicional vía API (la capa `llm.py` ya está preparada).
 - [ ] Interfaz Streamlit.
 - [ ] Soporte para PostgreSQL/MySQL.
 - [ ] Suite de evals (preguntas → SQL esperado) para medir precisión por modelo.

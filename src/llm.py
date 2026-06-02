@@ -2,8 +2,8 @@
 Capa de acceso al LLM.
 
 Por ahora solo implementa Ollama local, pero la interfaz `LLMClient` está
-pensada para que agregar otro backend (p. ej. DeepSeek) sea cuestión de crear
-otra subclase — el resto del agente no necesita cambiar.
+pensada para que agregar otro backend sea cuestión de crear otra subclase — el
+resto del agente no necesita cambiar.
 """
 
 from __future__ import annotations
@@ -69,7 +69,7 @@ class OllamaClient(LLMClient):
 def get_client() -> LLMClient:
     """Devuelve el cliente LLM configurado por variables de entorno.
 
-    Hoy siempre devuelve Ollama. Cuando se agregue DeepSeek, este es el único
-    lugar que decide qué backend usar (por ejemplo, según DEEPSEEK_API_KEY).
+    Hoy siempre devuelve Ollama. Si se agrega otro backend, este es el único
+    lugar que decide cuál usar (por ejemplo, según una variable de entorno).
     """
     return OllamaClient()
