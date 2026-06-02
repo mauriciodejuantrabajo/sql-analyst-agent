@@ -122,3 +122,7 @@ de escritura y múltiples sentencias. El LLM no puede modificar ni borrar datos.
 - [ ] Interfaz Streamlit.
 - [ ] Soporte para PostgreSQL/MySQL.
 - [ ] Suite de evals (preguntas → SQL esperado) para medir precisión por modelo.
+
+## Licencia
+
+[MIT](LICENSE) © Mauricio De Juan
