@@ -70,8 +70,8 @@ def main() -> None:
 
     console.print(Panel.fit(
         "[bold]SQL Analyst Agent[/bold]\n"
-        "Preguntá en lenguaje natural sobre la base de datos.\n"
-        "Recuerda la conversación, así que podés hacer preguntas de seguimiento.\n"
+        "Haz preguntas en lenguaje natural sobre la base de datos.\n"
+        "Recuerda la conversación, así que puedes hacer preguntas de seguimiento.\n"
         "[dim]Comandos: 'schema' (ver tablas) · 'reset' (olvidar) · 'salir'.[/dim]",
         border_style="blue",
     ))

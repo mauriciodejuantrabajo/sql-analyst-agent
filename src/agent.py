@@ -195,9 +195,9 @@ class SQLAgent:
         for name, cols in tables.items():
             lines.append(f"  • {name}: {', '.join(cols)}")
         lines.append(
-            "\nProbá preguntas como: «¿cuántos clientes hay?», "
+            "\nPrueba preguntas como: «¿cuántos clientes hay?», "
             "«top 5 productos más vendidos» o «pedidos completados de Lima». "
-            "Escribí 'schema' para ver el detalle técnico."
+            "Escribe 'schema' para ver el detalle técnico."
         )
         return "\n".join(lines)
 
@@ -247,8 +247,8 @@ class SQLAgent:
                 question=question, sql="", columns=[], rows=[],
                 explanation=(
                     "¡Hola! Soy un agente que responde preguntas sobre una base de "
-                    "datos. Preguntame por ejemplo «¿cuántos clientes hay?» o "
-                    "«top 5 productos más vendidos». Escribí 'schema' para ver las tablas."
+                    "datos. Pregúntame por ejemplo «¿cuántos clientes hay?» o "
+                    "«top 5 productos más vendidos». Escribe 'schema' para ver las tablas."
                 ),
                 is_query=False,
             )
