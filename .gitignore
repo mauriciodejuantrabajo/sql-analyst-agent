@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+.env
+store.db
+.venv/
+venv/
