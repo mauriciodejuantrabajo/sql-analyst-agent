@@ -45,6 +45,8 @@ Un agente *text-to-SQL* que:
 4. **Ejecuta** la consulta sobre SQLite.
 5. **Se auto-corrige**: si el SQL falla, le pasa el error al LLM y reintenta.
 6. **Explica** el resultado en lenguaje natural.
+7. **Recuerda la conversación**: las preguntas de seguimiento ("¿y en otro lugar?",
+   "ahora los cancelados") se resuelven usando el contexto de los turnos previos.
 
 ## Arquitectura
 
@@ -52,7 +54,7 @@ Un agente *text-to-SQL* que:
 src/
 ├── llm.py        Capa de LLM. Hoy Ollama; diseñada para sumar DeepSeek sin tocar el resto.
 ├── database.py   Inspección de esquema + ejecución SOLO LECTURA (validación de seguridad).
-├── agent.py      Orquesta: pregunta → SQL → ejecuta → (reintenta) → explica.
+├── agent.py      Orquesta: clasifica → SQL → ejecuta → (reintenta) → explica → recuerda.
 └── main.py       CLI interactivo (rich).
 seed_db.py        Genera store.db con datos de ejemplo (e-commerce).
 ```
@@ -77,7 +79,10 @@ python -m src.main
 
 Dentro del CLI:
 - Escribí cualquier pregunta en lenguaje natural.
+- Hacé preguntas de seguimiento: el agente recuerda la conversación.
+  Ej: *"¿cuántos clientes hay en Lima?"* → *"¿y en otro lugar que no sea Lima?"*
 - `schema` muestra las tablas disponibles.
+- `reset` olvida la conversación y empieza de cero.
 - `salir` para terminar.
 
 ## Configuración

@@ -3,10 +3,12 @@ El agente SQL: convierte una pregunta en lenguaje natural en una respuesta.
 
 Flujo:
     1. Lee el esquema de la base de datos.
-    2. Le pide al LLM que genere un SELECT.
-    3. Valida que sea de solo lectura y lo ejecuta.
-    4. Si falla, reintenta pasándole el error al LLM (auto-corrección).
-    5. Le pide al LLM que explique los resultados en lenguaje natural.
+    2. Clasifica el mensaje (DATOS / META / OTRO) usando el historial como contexto.
+    3. Le pide al LLM que genere un SELECT (con el historial para seguimientos).
+    4. Valida que sea de solo lectura y lo ejecuta.
+    5. Si falla, reintenta pasándole el error al LLM (auto-corrección).
+    6. Le pide al LLM que explique los resultados en lenguaje natural.
+    7. Guarda el turno (pregunta + SQL) en memoria para preguntas de seguimiento.
 """
 
 from __future__ import annotations
@@ -32,6 +34,11 @@ Reglas estrictas:
 - Incluí en el SELECT las columnas que hacen útil la respuesta: si la pregunta
   pide un ranking o un total, devolvé también ese valor calculado (con un alias),
   no solo el nombre.
+- Si te paso el HISTORIAL de la conversación, usalo para resolver preguntas de
+  seguimiento. Frases como "y en otro lugar", "ahora los cancelados" o "¿y el
+  año pasado?" se interpretan tomando la consulta anterior y cambiando solo el
+  filtro que el usuario menciona. Por ejemplo, si antes filtró city = 'Lima' y
+  ahora pide "otro lugar que no sea lima", usá city != 'Lima'.
 """
 
 EXPLAIN_SYSTEM_PROMPT = """\
@@ -41,6 +48,9 @@ español, de forma breve y clara.
 
 Reglas:
 - No inventes datos que no estén en los resultados.
+- Respondé directo a lo que se preguntó. Si el resultado es un único número
+  (un conteo o un total), decí ese número de forma clara y breve; no comentes
+  que "hay un solo resultado" ni que "falta información".
 - Si los resultados están VACÍOS (0 filas), no afirmes que algo "no existe" en
   la base. Decí que la consulta no devolvió filas y sugerí que quizá el filtro
   no coincide con ningún dato; no saques conclusiones de negocio.
@@ -79,6 +89,10 @@ Regla clave: si el mensaje pide un dato, conteo, listado o filtro (verbos como
 "cuántos", "dame", "mostrame", "listá", "arma la consulta", "top"), es DATOS,
 sin importar si el valor del filtro existe o no.
 
+Si te paso el HISTORIAL de la conversación, tenelo en cuenta: una pregunta de
+seguimiento sobre datos sigue siendo DATOS aunque sea corta o use referencias
+("y en otro lugar", "ahora los cancelados", "¿y los de Madrid?").
+
 Respondé exactamente: DATOS, META u OTRO.
 """
 
@@ -105,14 +119,35 @@ def _extract_sql(text: str) -> str:
 
 
 class SQLAgent:
-    def __init__(self, db: Database, llm: LLMClient, max_retries: int = 2) -> None:
+    def __init__(
+        self, db: Database, llm: LLMClient, max_retries: int = 2, memory_turns: int = 4
+    ) -> None:
         self.db = db
         self.llm = llm
         self.max_retries = max_retries
+        self.memory_turns = memory_turns
+        # Historial de turnos de datos: (pregunta, sql). Solo se guardan los
+        # que generaron una consulta válida, que es lo útil como contexto.
+        self._history: list[tuple[str, str]] = []
+
+    def reset(self) -> None:
+        """Olvida la conversación previa."""
+        self._history.clear()
+
+    def _history_block(self) -> str:
+        """Formatea los últimos turnos para inyectar como contexto, o '' si no hay."""
+        if not self._history:
+            return ""
+        recent = self._history[-self.memory_turns:]
+        lines = ["HISTORIAL de la conversación (más reciente al final):"]
+        for q, sql in recent:
+            lines.append(f"- Usuario: {q}")
+            lines.append(f"  SQL: {sql}")
+        return "\n".join(lines) + "\n\n"
 
     def _classify(self, question: str, schema: str) -> str:
-        """Clasifica el mensaje en DATOS, META u OTRO."""
-        prompt = f"Esquema:\n{schema}\n\nMensaje: {question}"
+        """Clasifica el mensaje en DATOS, META u OTRO (con contexto conversacional)."""
+        prompt = f"Esquema:\n{schema}\n\n{self._history_block()}Mensaje: {question}"
         answer = self.llm.chat(CLASSIFY_SYSTEM_PROMPT, prompt).strip().upper()
         for label in ("DATOS", "META", "OTRO"):
             if label in answer:
@@ -133,7 +168,7 @@ class SQLAgent:
         return "\n".join(lines)
 
     def _generate_sql(self, question: str, schema: str, prev_error: str | None) -> str:
-        prompt = f"Esquema:\n{schema}\n\nPregunta: {question}"
+        prompt = f"Esquema:\n{schema}\n\n{self._history_block()}Pregunta: {question}"
         if prev_error:
             prompt += (
                 f"\n\nLa consulta anterior falló con este error:\n{prev_error}\n"
@@ -186,6 +221,7 @@ class SQLAgent:
                 continue
 
             explanation = self._explain(question, sql, columns, rows)
+            self._history.append((question, sql))  # recordar para seguimientos
             return AgentResult(
                 question=question,
                 sql=sql,

@@ -71,7 +71,8 @@ def main() -> None:
     console.print(Panel.fit(
         "[bold]SQL Analyst Agent[/bold]\n"
         "Preguntá en lenguaje natural sobre la base de datos.\n"
-        "[dim]Escribí 'schema' para ver las tablas, 'salir' para terminar.[/dim]",
+        "Recuerda la conversación, así que podés hacer preguntas de seguimiento.\n"
+        "[dim]Comandos: 'schema' (ver tablas) · 'reset' (olvidar) · 'salir'.[/dim]",
         border_style="blue",
     ))
 
@@ -89,6 +90,10 @@ def main() -> None:
             break
         if question.lower() == "schema":
             console.print(Panel(db.schema_description(), title="Esquema", border_style="cyan"))
+            continue
+        if question.lower() in {"reset", "olvidar", "nuevo"}:
+            agent.reset()
+            console.print("[dim]Memoria borrada. Empezamos una conversación nueva.[/dim]")
             continue
 
         try:
