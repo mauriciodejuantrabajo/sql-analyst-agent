@@ -56,6 +56,25 @@ Reglas:
   no coincide con ningún dato; no saques conclusiones de negocio.
 """
 
+REWRITE_SYSTEM_PROMPT = """\
+Reescribís el último mensaje del usuario como una pregunta COMPLETA y
+auto-contenida, resolviendo cualquier referencia al contexto de la conversación.
+
+Te paso el historial (preguntas previas y el SQL que se ejecutó) y el mensaje
+nuevo. Devolvé SOLO la pregunta reescrita, sin explicaciones.
+
+Reglas:
+- Si el mensaje ya es auto-contenido, devolvelo tal cual.
+- Resolvé referencias elípticas usando el historial. Ejemplos (si antes se
+  preguntó "cuántos clientes hay en Lima"):
+    "y los que no hay ahi"      -> "¿cuántos clientes hay que NO sean de Lima?"
+    "y cuantos no hay en lima"  -> "¿cuántos clientes hay que NO sean de Lima?"
+    "y en Madrid?"              -> "¿cuántos clientes hay en Madrid?"
+    "ahora los cancelados"      -> "¿cuántos clientes con pedidos cancelados hay?"
+- Si el mensaje es un saludo o charla ("hola", "gracias"), devolvelo tal cual.
+- No inventes filtros que el usuario no pidió.
+"""
+
 CLASSIFY_SYSTEM_PROMPT = """\
 Clasificás el mensaje del usuario en UNA de estas tres categorías. Respondé SOLO
 con la palabra de la categoría, sin explicaciones.
@@ -145,9 +164,24 @@ class SQLAgent:
             lines.append(f"  SQL: {sql}")
         return "\n".join(lines) + "\n\n"
 
+    def _rewrite(self, question: str) -> str:
+        """Reescribe un seguimiento como pregunta auto-contenida usando el historial.
+
+        Sin historial no hay nada que resolver: se devuelve el mensaje tal cual.
+        """
+        if not self._history:
+            return question
+        prompt = f"{self._history_block()}Mensaje nuevo: {question}"
+        rewritten = self.llm.chat(REWRITE_SYSTEM_PROMPT, prompt).strip()
+        return rewritten or question
+
     def _classify(self, question: str, schema: str) -> str:
-        """Clasifica el mensaje en DATOS, META u OTRO (con contexto conversacional)."""
-        prompt = f"Esquema:\n{schema}\n\n{self._history_block()}Mensaje: {question}"
+        """Clasifica una pregunta YA auto-contenida en DATOS, META u OTRO.
+
+        No recibe historial a propósito: opera sobre la versión reescrita, que es
+        mucho más fácil de clasificar de forma fiable con un modelo chico.
+        """
+        prompt = f"Esquema:\n{schema}\n\nMensaje: {question}"
         answer = self.llm.chat(CLASSIFY_SYSTEM_PROMPT, prompt).strip().upper()
         for label in ("DATOS", "META", "OTRO"):
             if label in answer:
@@ -168,7 +202,8 @@ class SQLAgent:
         return "\n".join(lines)
 
     def _generate_sql(self, question: str, schema: str, prev_error: str | None) -> str:
-        prompt = f"Esquema:\n{schema}\n\n{self._history_block()}Pregunta: {question}"
+        # `question` ya viene reescrita y auto-contenida (sin referencias al contexto).
+        prompt = f"Esquema:\n{schema}\n\nPregunta: {question}"
         if prev_error:
             prompt += (
                 f"\n\nLa consulta anterior falló con este error:\n{prev_error}\n"
@@ -178,19 +213,29 @@ class SQLAgent:
         return _extract_sql(raw)
 
     def _explain(self, question: str, sql: str, columns: list[str], rows: list[tuple]) -> str:
-        preview = [dict(zip(columns, r)) for r in rows[:20]]
+        # Caso escalar (un solo valor, típico de COUNT/SUM): presentarlo directo
+        # para que el modelo no se enrede con "hay una sola fila".
+        if len(rows) == 1 and len(rows[0]) == 1:
+            results_block = f"El valor calculado es: {rows[0][0]}"
+        else:
+            preview = [dict(zip(columns, r)) for r in rows[:20]]
+            results_block = f"Resultados ({len(rows)} filas, muestra):\n{preview}"
         prompt = (
             f"Pregunta: {question}\n\n"
             f"SQL ejecutado:\n{sql}\n\n"
-            f"Resultados ({len(rows)} filas, muestra):\n{preview}"
+            f"{results_block}"
         )
         return self.llm.chat(EXPLAIN_SYSTEM_PROMPT, prompt)
 
     def ask(self, question: str) -> AgentResult:
         schema = self.db.schema_description()
 
-        # No fabriques SQL salvo que el mensaje pida un dato concreto.
-        category = self._classify(question, schema)
+        # 1. Reescribir el seguimiento como pregunta auto-contenida. A partir de
+        #    acá se trabaja con `query`, que ya no tiene referencias al contexto.
+        query = self._rewrite(question)
+
+        # 2. Clasificar la versión reescrita (más fácil y fiable).
+        category = self._classify(query, schema)
         if category == "META":
             return AgentResult(
                 question=question, sql="", columns=[], rows=[],
@@ -212,7 +257,7 @@ class SQLAgent:
         prev_error: str | None = None
 
         for attempt in range(1, self.max_retries + 2):  # 1 intento + reintentos
-            sql = self._generate_sql(question, schema, prev_error)
+            sql = self._generate_sql(query, schema, prev_error)
             try:
                 columns, rows = self.db.run_select(sql)
             except (UnsafeQueryError, Exception) as exc:  # noqa: BLE001
@@ -220,8 +265,9 @@ class SQLAgent:
                 errors.append(f"Intento {attempt}: {prev_error}")
                 continue
 
-            explanation = self._explain(question, sql, columns, rows)
-            self._history.append((question, sql))  # recordar para seguimientos
+            explanation = self._explain(query, sql, columns, rows)
+            # Guardar la versión reescrita: encadena bien los próximos seguimientos.
+            self._history.append((query, sql))
             return AgentResult(
                 question=question,
                 sql=sql,
