@@ -39,7 +39,12 @@ class Database:
         return conn
 
     def schema_description(self) -> str:
-        """Devuelve el esquema en texto plano para dárselo al LLM como contexto."""
+        """Devuelve el esquema en texto plano para dárselo al LLM como contexto.
+
+        Para columnas de texto con pocos valores distintos (p. ej. `status`),
+        incluye esos valores entre paréntesis. Así el LLM filtra usando los
+        valores reales ('completado') y no inventa variantes ('completados').
+        """
         conn = self._connect()
         try:
             tables = [
@@ -53,11 +58,38 @@ class Database:
             lines: list[str] = []
             for table in tables:
                 cols = conn.execute(f"PRAGMA table_info({table})").fetchall()
-                col_defs = ", ".join(f"{c['name']} {c['type']}" for c in cols)
-                lines.append(f"{table}({col_defs})")
+                col_defs = []
+                for c in cols:
+                    desc = f"{c['name']} {c['type']}"
+                    values = self._distinct_values(conn, table, c["name"], c["type"])
+                    if values:
+                        desc += " valores posibles: " + ", ".join(
+                            f"'{v}'" for v in values
+                        )
+                    col_defs.append(desc)
+                lines.append(f"{table}(" + ", ".join(col_defs) + ")")
             return "\n".join(lines)
         finally:
             conn.close()
+
+    @staticmethod
+    def _distinct_values(
+        conn: sqlite3.Connection, table: str, column: str, col_type: str, max_values: int = 10
+    ) -> list[str] | None:
+        """Valores distintos de una columna de texto, solo si son pocos.
+
+        Devuelve None si la columna no es de texto o tiene demasiada cardinalidad
+        (un email o un nombre no aportan como enum; un `status` sí).
+        """
+        if "char" not in col_type.lower() and "text" not in col_type.lower():
+            return None
+        rows = conn.execute(
+            f'SELECT DISTINCT "{column}" FROM "{table}" '
+            f'WHERE "{column}" IS NOT NULL LIMIT {max_values + 1}'
+        ).fetchall()
+        if len(rows) > max_values:
+            return None  # demasiados valores: no es categórica
+        return [str(r[0]) for r in rows]
 
     @staticmethod
     def assert_safe(sql: str) -> None:

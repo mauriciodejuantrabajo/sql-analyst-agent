@@ -27,6 +27,11 @@ DEFAULT_DB = Path(__file__).parent.parent / "store.db"
 
 
 def render_result(result) -> None:
+    # Mensaje que no era una consulta de datos: solo la respuesta.
+    if not result.is_query:
+        console.print(Panel(result.explanation, border_style="yellow"))
+        return
+
     console.print(Panel(Syntax(result.sql, "sql", theme="monokai", word_wrap=True),
                         title="SQL generado", border_style="cyan"))
 

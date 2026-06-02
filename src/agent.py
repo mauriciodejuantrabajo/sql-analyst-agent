@@ -37,7 +37,23 @@ Reglas estrictas:
 EXPLAIN_SYSTEM_PROMPT = """\
 Sos un analista de datos. Te paso una pregunta del usuario, la consulta SQL que
 se ejecutó y sus resultados. Explicá la respuesta en lenguaje natural, en
-español, de forma breve y clara. No inventes datos que no estén en los resultados.
+español, de forma breve y clara.
+
+Reglas:
+- No inventes datos que no estén en los resultados.
+- Si los resultados están VACÍOS (0 filas), no afirmes que algo "no existe" en
+  la base. Decí que la consulta no devolvió filas y sugerí que quizá el filtro
+  no coincide con ningún dato; no saques conclusiones de negocio.
+"""
+
+CLASSIFY_SYSTEM_PROMPT = """\
+Decidís si el mensaje del usuario es una PREGUNTA SOBRE DATOS que se puede
+responder consultando una base de datos, o si es otra cosa (un saludo, charla,
+una pregunta general, etc.).
+
+Te paso el esquema de la base y el mensaje. Respondé SOLO con una palabra:
+- "DATOS" si se puede responder con una consulta SQL sobre ese esquema.
+- "OTRO" en cualquier otro caso.
 """
 
 
@@ -50,6 +66,7 @@ class AgentResult:
     explanation: str
     attempts: int = 1
     errors: list[str] = field(default_factory=list)
+    is_query: bool = True  # False si el mensaje no era una consulta de datos
 
 
 def _extract_sql(text: str) -> str:
@@ -66,6 +83,12 @@ class SQLAgent:
         self.db = db
         self.llm = llm
         self.max_retries = max_retries
+
+    def _is_data_question(self, question: str, schema: str) -> bool:
+        """¿El mensaje se puede responder con una consulta a la base?"""
+        prompt = f"Esquema:\n{schema}\n\nMensaje: {question}"
+        answer = self.llm.chat(CLASSIFY_SYSTEM_PROMPT, prompt).strip().upper()
+        return answer.startswith("DATOS")
 
     def _generate_sql(self, question: str, schema: str, prev_error: str | None) -> str:
         prompt = f"Esquema:\n{schema}\n\nPregunta: {question}"
@@ -88,6 +111,22 @@ class SQLAgent:
 
     def ask(self, question: str) -> AgentResult:
         schema = self.db.schema_description()
+
+        # Si no es una pregunta de datos, no fabriques SQL: respondé y salí.
+        if not self._is_data_question(question, schema):
+            return AgentResult(
+                question=question,
+                sql="",
+                columns=[],
+                rows=[],
+                explanation=(
+                    "Eso no parece una pregunta sobre los datos. Preguntame algo "
+                    "sobre la base, por ejemplo: «¿qué categoría vende más?» o "
+                    "«clientes con más pedidos». Escribí 'schema' para ver las tablas."
+                ),
+                is_query=False,
+            )
+
         errors: list[str] = []
         prev_error: str | None = None
 
