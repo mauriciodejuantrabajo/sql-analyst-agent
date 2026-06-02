@@ -50,19 +50,34 @@ CLASSIFY_SYSTEM_PROMPT = """\
 Clasificás el mensaje del usuario en UNA de estas tres categorías. Respondé SOLO
 con la palabra de la categoría, sin explicaciones.
 
-- DATOS: pide un dato concreto que sale de consultar filas de la base.
-  Ej: "cuántos clientes hay", "top 5 productos por ventas", "pedidos de Lima".
+- DATOS: el usuario pide consultar, contar, listar, filtrar o calcular algo sobre
+  las filas (clientes, pedidos, productos, etc.). Es DATOS aunque el filtro use un
+  valor que quizá no exista en la base: igual hay que ejecutar la consulta.
+  Ejemplos:
+    "cuántos clientes hay" -> DATOS
+    "top 5 productos por ventas" -> DATOS
+    "pedidos de Lima" -> DATOS
+    "arma la consulta de ordenes y customers de Londres, cuántos hay" -> DATOS
+    "dame los clientes de Marte" -> DATOS (se ejecuta aunque no haya resultados)
 
-- META: pregunta sobre el agente o sobre QUÉ información hay disponible, no sobre
-  un dato puntual. Incluye pedir ayuda o saber qué se puede preguntar.
-  Ej: "qué tenés", "qué datos hay", "qué podés hacer", "ayuda", "cómo funcionás",
-  "qué tablas hay", "sobre qué puedo preguntar".
+- META: pregunta sobre el agente o sobre QUÉ información existe en general, sin
+  pedir un dato puntual. Incluye pedir ayuda o saber qué se puede preguntar.
+  Ejemplos:
+    "qué tenés" -> META
+    "qué datos hay" -> META
+    "qué podés hacer" -> META
+    "ayuda" -> META
+    "qué tablas hay" -> META
 
-- OTRO: saludos o charla que no se relacionan con la base.
-  Ej: "hola", "gracias", "cómo estás", "contame un chiste".
+- OTRO: saludos o charla sin relación con la base.
+  Ejemplos:
+    "hola" -> OTRO
+    "gracias" -> OTRO
+    "contame un chiste" -> OTRO
 
-Ante la duda entre DATOS y META: si el mensaje NO nombra una entidad concreta de
-la base (cliente, pedido, producto, ciudad, etc.), es META.
+Regla clave: si el mensaje pide un dato, conteo, listado o filtro (verbos como
+"cuántos", "dame", "mostrame", "listá", "arma la consulta", "top"), es DATOS,
+sin importar si el valor del filtro existe o no.
 
 Respondé exactamente: DATOS, META u OTRO.
 """
